@@ -1,0 +1,15 @@
+import "./globals.css";
+import React from "react";
+
+export const metadata = {
+  title: "FIDRA - Check if a link, phone or email is a scam",
+  description: "Paste any link, phone number or email. FIDRA checks it instantly.",
+};
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <body>{children}</body>
+    </html>
+  );
+}
