@@ -6,9 +6,9 @@ export async function POST(req: Request) {
   let score = 10;
   const flags: string[] = [];
 
-  const isUrl = t.includes("http") || t.includes("www.") || t.includes(".com") || t.includes(".ng") || t.includes("bit.ly") || t.includes("tinyurl");
+  const isUrl = t.includes("http") || t.includes("www.") || t.includes(".com") || t.includes(".ng") || t.includes("bit.ly");
 
-  // --- 1. MESSAGE SCAM WORDS (your old logic) ---
+  // --- 1. MESSAGE SCAM WORDS ---
   const checks = [
     ["double", "Promise to double your money", 35],
     ["guaranteed", "Guaranteed profit / no risk", 30],
@@ -17,26 +17,26 @@ export async function POST(req: Request) {
     ["crypto", "Crypto / forex doubling scheme", 20],
     ["send", "Asking you to send money first", 25],
     ["account", "Asking for account / OTP / PIN", 30],
-    ["investment", "Unregistered investment promise", 15],
+    ["investment", "Unregistered investment promise", 25],
   ] as const;
 
   for (const [word, label, points] of checks) {
     if (t.includes(word)) { score += points; flags.push(label); }
   }
-  if (/\d+%/.test(t) && t.includes("profit")) { score += 20; flags.push("Unrealistic % profit promised"); }
-  if (t.includes("http")) { score += 10; flags.push("Contains a link - verify it separately"); }
+  if (/\d+%/.test(t) && t.includes("profit")) { score += 20; flags.push("Unrealistic profit %"); }
+  if (t.includes("http")) { score += 10; flags.push("Contains a link"); }
 
-  // --- 2. URL CHECKS (this is the fix) ---
+  // --- 2. URL CHECKS ---
   if (isUrl) {
-    // Extract domain
-    let domain = t.replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0].split("?")[0];
+    let domain = t.replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0];
+    let path = t.replace(/^https?:\/\//, "").replace(/^www\./, "").split("/").slice(1).join("/");
 
     // a) Shorteners - hide real destination
-    if (["bit.ly","tinyurl.com","t.co","cutt.ly","is.gd","shorte.st","rebrand.ly"].some(s => domain.includes(s))) {
-      score += 30; flags.push("Uses a link shortener - real destination hidden");
+    if (["bit.ly", "tinyurl.com", "t.co", "cutt.ly", "is.gd", "rebrand.ly"].some(s => domain === s)) {
+      score += 30; flags.push("Uses a link shortener - hides real destination");
     }
 
-    // b) Brand impersonation: mentions a real brand but domain is NOT the real one
+    // b) Brand impersonation: brand in domain OR path, but domain is NOT official
     const brands: Record<string, string[]> = {
       "opay": ["opay.ng", "opay.com"],
       "gtbank": ["gtbank.com", "gtb.com"],
@@ -49,30 +49,32 @@ export async function POST(req: Request) {
       "binance": ["binance.com"],
     };
     for (const brand in brands) {
-      if (t.includes(brand) && !brands[brand].some(real => domain === real || domain.endsWith("." + real))) {
-        score += 40; flags.push(`Claims to be ${brand.toUpperCase()} but domain is ${domain} - likely fake`);
+      const isOfficial = brands[brand].some(real => domain === real || domain.endsWith("." + real));
+      const mentionsBrand = domain.includes(brand) || path.includes(brand);
+      if (mentionsBrand && !isOfficial) {
+        score += 40; flags.push(`Claims to be ${brand} but domain is ${domain} - not official`);
         break;
       }
     }
 
     // c) Phishing keywords in URL
-    if (["verify", "login", "secure", "update", "suspended", "blocked", "confirm"].some(w => t.includes(w))) {
-      score += 25; flags.push("URL uses phishing words like verify / login / secure");
+    if (["verify", "login", "secure", "update", "suspend", "confirm", "unlock"].some(w => t.includes(w))) {
+      score += 25; flags.push("URL uses phishing word (verify/login/secure)");
     }
 
-    // d) Bank + login combo in fake domain
-    if (t.includes("bank") && (t.includes("login") || t.includes("verify"))) {
-      score += 20; flags.push("Fake bank login pattern");
+    // d) Bank + login combo
+    if (t.includes("bank") && t.includes("login")) {
+      score += 20; flags.push("Fake bank login combo");
     }
 
-    // e) Too many hyphens = lookalike domain
+    // e) Too many hyphens in DOMAIN only (not full link)
     if ((domain.match(/-/g) || []).length >= 2) {
       score += 15; flags.push("Suspicious domain with many hyphens");
     }
 
     // f) IP address instead of domain
     if (/\d+\.\d+\.\d+\.\d+/.test(domain)) {
-      score += 35; flags.push("Link uses an IP address instead of a real domain");
+      score += 35; flags.push("Link uses an IP address instead of a domain");
     }
 
     // g) Not HTTPS
@@ -82,8 +84,9 @@ export async function POST(req: Request) {
   }
 
   score = Math.min(score, 98);
-  const verdict = score >= 70 ? "HIGH RISK - Likely Scam" : score >= 40 ? "MEDIUM RISK - Be Careful" : "LOW RISK - Looks Okay";
-  const reason = score >= 70 ? "This has multiple classic scam patterns. Do not send money." : score >= 40 ? "Some warning signs. Verify the person/company before you proceed." : "No strong scam patterns found, but stay cautious.";
+  const verdict = score >= 70 ? "HIGH RISK - DO NOT CLICK" : score >= 40 ? "SUSPICIOUS - BE CAREFUL" : "LOW RISK";
+  // FIX: Use the actual flags as the reason, not one generic message
+  const reason = flags.length > 0 ? flags.join(" • ") : "No scam signals found.";
 
   return NextResponse.json({ score, verdict, reason, flags });
 }
